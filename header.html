@@ -1,0 +1,151 @@
+<script>
+  (function () {
+    console.log("Timing logger initialized");
+    // ---- CONFIG ----
+    const ED_FIELD = "timing";
+    const INPUT_DEBOUNCE_MS = 500; // adjust: 300–800ms typical
+
+    // ---- STATE INIT ----
+    function getState() {
+      let raw = Qualtrics.SurveyEngine.getJSEmbeddedData(ED_FIELD);
+
+      if (!raw) return { pages: [] };
+
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        return { pages: [] };
+      }
+    }
+
+    function setState(state) {
+      Qualtrics.SurveyEngine.setJSEmbeddedData(ED_FIELD, JSON.stringify(state));
+    }
+
+    function now() {
+      return new Date().toISOString();
+    }
+
+    function getPageIndex(state) {
+      return state.pages.length;
+    }
+
+    // ---- MAIN HOOK ----
+    Qualtrics.SurveyEngine.addOnReady(function () {
+      const state = getState();
+      const pageIndex = getPageIndex(state);
+
+      const page = {
+        page_index: pageIndex,
+        load_time: now(),
+        events: [],
+      };
+
+      // ---- EVENT LOGGER ----
+      function logEvent(type, el) {
+        const event = {
+          type: type,
+          time: now(),
+        };
+
+        if (el) {
+          const qContainer = el.closest(".QuestionOuter");
+
+          if (qContainer) {
+            event.qid = qContainer.id || null;
+          }
+
+          if (el.type) {
+            event.input_type = el.type;
+          }
+
+          if (el.name) {
+            event.name = el.name;
+          }
+        }
+
+        page.events.push(event);
+      }
+
+      // ---- DEBOUNCE STATE (per element) ----
+      const debounceMap = new WeakMap();
+
+      function debounceInput(el) {
+        if (!el) return;
+
+        if (debounceMap.has(el)) {
+          clearTimeout(debounceMap.get(el));
+        }
+
+        const timeoutId = setTimeout(function () {
+          logEvent("input", el);
+          debounceMap.delete(el);
+        }, INPUT_DEBOUNCE_MS);
+
+        debounceMap.set(el, timeoutId);
+      }
+
+      // Helpers
+
+      function isTextLike(el) {
+        if (!el || !el.tagName) return false;
+        if (el.tagName === "TEXTAREA") return true;
+        if (el.tagName === "INPUT") {
+          return /^(text|email|number|search|tel|url|password)$/.test(el.type);
+        }
+        return false;
+      }
+
+      function isMeaningfulClick(el) {
+        if (!el || !el.tagName) return false;
+        // Only log clicks on things you actually "press": buttons and links.
+        // Radio/checkbox selection is captured by `change`.
+        if (el.tagName === "BUTTON" || el.tagName === "A") return true;
+        if (el.tagName === "INPUT" && /^(button|submit)$/.test(el.type))
+          return true;
+        return false;
+      }
+
+      // ---- INTERACTION TRACKING ----
+
+      document.addEventListener("click", function (e) {
+        if (isMeaningfulClick(e.target)) logEvent("click", e.target);
+      });
+
+      document.addEventListener("change", function (e) {
+        // Canonical "user provided an answer" for radios, checkboxes, selects,
+        // and (on blur) text fields.
+        logEvent("change", e.target);
+      });
+
+      document.addEventListener("input", function (e) {
+        // Only debounce real text entry. Radios/checkboxes also fire `input`
+        // but `change` already covers them.
+        if (isTextLike(e.target)) debounceInput(e.target);
+      });
+
+      // ---- FOCUS / VISIBILITY ----
+
+      document.addEventListener("visibilitychange", function () {
+        logEvent(document.hidden ? "hidden" : "visible");
+      });
+
+      window.addEventListener("blur", function () {
+        logEvent("window_blur");
+      });
+
+      window.addEventListener("focus", function () {
+        logEvent("window_focus");
+      });
+
+      // ---- PAGE SUBMIT ----
+      Qualtrics.SurveyEngine.addOnPageSubmit(function () {
+        page.submit_time = now();
+
+        state.pages.push(page);
+
+        setState(state);
+      });
+    });
+  })();
+</script>
