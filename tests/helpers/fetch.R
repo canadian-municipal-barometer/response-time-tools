@@ -24,4 +24,7 @@ df <- qualtRics::fetch_survey(
   verbose = TRUE,
 )
 
+colmap <- qualtRics::extract_colmap(df)
+
+readr::write_csv(colmap, "survey_data_colmap.csv")
 readr::write_csv(df, "survey_data.csv")
