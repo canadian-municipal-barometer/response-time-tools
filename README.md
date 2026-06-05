@@ -14,7 +14,7 @@ This toolkit enables per-question response timing analysis for Qualtrics surveys
 ### Prerequisites
 
 - R with packages: `qualtRics`, `jsonlite`, `dplyr`, `tidyr`, `purrr`, `lubridate`, `ggplot2`, `readr`
-- A Qualtrics API key set as environment variable `QUALTRICS_API_KEY`
+- A Qualtrics API key set as the environment variable `QUALTRICS_API_KEY`
 
 ### Usage
 

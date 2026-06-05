@@ -1,0 +1,19 @@
+Package: surveytiming
+Title: Qualtrics Survey Response Timing Analysis
+Version: 0.0.0.9000
+Author: Reed Merrill [aut, cre]
+Maintainer: Reed Merrill <reed.merrill@example.com>
+Description: Parse Qualtrics JavaScript timing data and compute
+    per-question response times from client-side event logs.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports: 
+    dplyr,
+    jsonlite,
+    lubridate,
+    purrr,
+    readr,
+    rlang,
+    tidyr
