@@ -41,6 +41,35 @@
         events: [],
       };
 
+      // Resolve the Qualtrics question id (e.g. "QID69", or a matrix statement
+      // like "QID47-4") for an element. Radios/checkboxes carry it directly on
+      // `name`; text/textarea inputs don't -- in the new survey-taking
+      // experience they have no id or name at all, only an
+      // `aria-labelledby="question-display-QIDn"` and a `question-QIDn` wrapper
+      // -- so recover the QID from the element's own id/name, its
+      // aria-labelledby, or the nearest ancestor whose id contains the QID.
+      // Returning the id as `name` keeps every answer event in the shape the
+      // downstream parser keys on.
+      function resolveName(el) {
+        if (el.name && /^QID\d/.test(el.name)) return el.name;
+
+        const fromSelf = (el.id || el.name || "").match(/QID\d+(?:-\d+)?/);
+        if (fromSelf) return fromSelf[0];
+
+        const labelledby =
+          (el.getAttribute && el.getAttribute("aria-labelledby")) || "";
+        const fromAria = labelledby.match(/QID\d+(?:-\d+)?/);
+        if (fromAria) return fromAria[0];
+
+        const container = el.closest('[id*="QID"]');
+        if (container) {
+          const fromContainer = container.id.match(/QID\d+(?:-\d+)?/);
+          if (fromContainer) return fromContainer[0];
+        }
+
+        return el.name || null;
+      }
+
       // ---- EVENT LOGGER ----
       function logEvent(type, el) {
         const event = {
@@ -49,18 +78,13 @@
         };
 
         if (el) {
-          const qContainer = el.closest(".QuestionOuter");
-
-          if (qContainer) {
-            event.qid = qContainer.id || null;
-          }
-
           if (el.type) {
             event.input_type = el.type;
           }
 
-          if (el.name) {
-            event.name = el.name;
+          const name = resolveName(el);
+          if (name) {
+            event.name = name;
           }
         }
 
@@ -108,7 +132,35 @@
 
       // ---- INTERACTION TRACKING ----
 
+      // New-experience drop-downs are an ARIA combobox -- a
+      // <div role="combobox" id="QIDn"> backed by a <ul role="listbox"> of
+      // <li role="option"> items -- with no native <select>. Picking a value
+      // fires no change/input event, only a click on the option <li>, so capture
+      // that and log the answer in the same shape as other inputs (type
+      // "change", input_type "select", name = QID). The option id is
+      // "menu-item-QIDn-<choice>", so read the QID from the owning
+      // "question-QIDn" wrapper to drop the choice suffix.
+      function logDropdownSelect(optionEl) {
+        const wrapper = optionEl.closest('[id^="question-QID"]');
+        const src = (wrapper && wrapper.id) || optionEl.id || "";
+        const match = src.match(/QID\d+/);
+        if (!match) return;
+
+        page.events.push({
+          type: "change",
+          time: now(),
+          input_type: "select",
+          name: match[0],
+        });
+      }
+
       document.addEventListener("click", function (e) {
+        const option = e.target.closest && e.target.closest('[role="option"]');
+        if (option) {
+          logDropdownSelect(option);
+          return;
+        }
+
         if (isMeaningfulClick(e.target)) logEvent("click", e.target);
       });
 
