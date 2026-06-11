@@ -24,7 +24,8 @@ A \link[tibble:tibble-package]{tibble} with columns:
 \item{submit_time}{Page submit time (POSIXct).}
 \item{type}{Event type (e.g., \code{"change"}, \code{"click"}, \code{"window_focus"}).}
 \item{time}{Event timestamp (POSIXct).}
-\item{input_type}{HTML input type (e.g. \code{"radio"}, \code{"textarea"}).}
+\item{input_type}{HTML input type (e.g. \code{"radio"}, \code{"textarea"},
+\code{"select"}).}
 \item{name}{Question ID (e.g. \code{"QID1"}), if associated with an input.}
 \item{t_since_load}{Seconds between page load and this event.}
 }

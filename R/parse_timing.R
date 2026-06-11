@@ -20,7 +20,8 @@
 #'     \item{submit_time}{Page submit time (POSIXct).}
 #'     \item{type}{Event type (e.g., `"change"`, `"click"`, `"window_focus"`).}
 #'     \item{time}{Event timestamp (POSIXct).}
-#'     \item{input_type}{HTML input type (e.g. `"radio"`, `"textarea"`).}
+#'     \item{input_type}{HTML input type (e.g. `"radio"`, `"textarea"`,
+#'       `"select"`).}
 #'     \item{name}{Question ID (e.g. `"QID1"`), if associated with an input.}
 #'     \item{t_since_load}{Seconds between page load and this event.}
 #'   }

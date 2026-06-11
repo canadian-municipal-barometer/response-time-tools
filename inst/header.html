@@ -134,17 +134,38 @@
 
       // New-experience drop-downs are an ARIA combobox -- a
       // <div role="combobox" id="QIDn"> backed by a <ul role="listbox"> of
-      // <li role="option"> items -- with no native <select>. Picking a value
-      // fires no change/input event, only a click on the option <li>, so capture
-      // that and log the answer in the same shape as other inputs (type
-      // "change", input_type "select", name = QID). The option id is
-      // "menu-item-QIDn-<choice>", so read the QID from the owning
+      // <li role="option"> items -- with no native <select>, so picking a
+      // value fires no change/input event. The widget also defeats a plain
+      // bubble-phase click listener two ways: it commits the selection on
+      // pointerdown/mousedown and unmounts the listbox (so no click is ever
+      // dispatched on the option), and its own handlers may stopPropagation().
+      // So every document listener below uses the CAPTURE phase, the option
+      // press is logged on pointerdown (the first event a selection can
+      // produce) with click kept as a fallback, and Enter on an expanded
+      // combobox covers keyboard selection. logDropdownSelect() dedupes so a
+      // single selection logs once, in the same shape as other inputs (type
+      // "change", input_type "select", name = QID). Option ids look like
+      // "menu-item-QIDn-<choice>", so prefer the QID from the owning
       // "question-QIDn" wrapper to drop the choice suffix.
-      function logDropdownSelect(optionEl) {
-        const wrapper = optionEl.closest('[id^="question-QID"]');
-        const src = (wrapper && wrapper.id) || optionEl.id || "";
+      let lastDropdown = { name: null, t: 0 };
+
+      function logDropdownSelect(el) {
+        // The first option is a "Select one" placeholder whose id has an
+        // empty choice suffix ("menu-item-QIDn-"). Picking it clears the
+        // answer, so don't log it as one.
+        if (/^menu-item-QID\d+-$/.test(el.id || "")) return;
+
+        const wrapper = el.closest('[id^="question-QID"]');
+        const src = (wrapper && wrapper.id) || el.id || "";
         const match = src.match(/QID\d+/);
         if (!match) return;
+
+        // Collapse pointerdown + fallback click (or Enter + synthetic click)
+        // from one selection. question_timings() keys on min(time) per QID,
+        // so a stray duplicate outside this window is harmless anyway.
+        const t = Date.now();
+        if (match[0] === lastDropdown.name && t - lastDropdown.t < 500) return;
+        lastDropdown = { name: match[0], t: t };
 
         page.events.push({
           type: "change",
@@ -154,27 +175,69 @@
         });
       }
 
-      document.addEventListener("click", function (e) {
-        const option = e.target.closest && e.target.closest('[role="option"]');
-        if (option) {
-          logDropdownSelect(option);
-          return;
-        }
+      function optionFromEvent(e) {
+        const el = e.target;
+        return (el && el.closest && el.closest('[role="option"]')) || null;
+      }
 
-        if (isMeaningfulClick(e.target)) logEvent("click", e.target);
-      });
+      document.addEventListener(
+        "pointerdown",
+        function (e) {
+          const option = optionFromEvent(e);
+          if (option) logDropdownSelect(option);
+        },
+        true
+      );
 
-      document.addEventListener("change", function (e) {
-        // Canonical "user provided an answer" for radios, checkboxes, selects,
-        // and (on blur) text fields.
-        logEvent("change", e.target);
-      });
+      document.addEventListener(
+        "click",
+        function (e) {
+          const option = optionFromEvent(e);
+          if (option) {
+            logDropdownSelect(option);
+            return;
+          }
 
-      document.addEventListener("input", function (e) {
-        // Only debounce real text entry. Radios/checkboxes also fire `input`
-        // but `change` already covers them.
-        if (isTextLike(e.target)) debounceInput(e.target);
-      });
+          if (isMeaningfulClick(e.target)) logEvent("click", e.target);
+        },
+        true
+      );
+
+      document.addEventListener(
+        "keydown",
+        function (e) {
+          // Enter on an open combobox commits the highlighted option without
+          // any pointer event. aria-expanded gates out the Enter that merely
+          // opens the menu.
+          if (e.key !== "Enter") return;
+          const combo =
+            e.target.closest && e.target.closest('[role="combobox"]');
+          if (combo && combo.getAttribute("aria-expanded") === "true") {
+            logDropdownSelect(combo);
+          }
+        },
+        true
+      );
+
+      document.addEventListener(
+        "change",
+        function (e) {
+          // Canonical "user provided an answer" for radios, checkboxes,
+          // selects, and (on blur) text fields.
+          logEvent("change", e.target);
+        },
+        true
+      );
+
+      document.addEventListener(
+        "input",
+        function (e) {
+          // Only debounce real text entry. Radios/checkboxes also fire
+          // `input` but `change` already covers them.
+          if (isTextLike(e.target)) debounceInput(e.target);
+        },
+        true
+      );
 
       // ---- FOCUS / VISIBILITY ----
 
