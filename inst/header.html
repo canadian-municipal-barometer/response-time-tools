@@ -186,7 +186,7 @@
           const option = optionFromEvent(e);
           if (option) logDropdownSelect(option);
         },
-        true
+        true,
       );
 
       document.addEventListener(
@@ -200,7 +200,7 @@
 
           if (isMeaningfulClick(e.target)) logEvent("click", e.target);
         },
-        true
+        true,
       );
 
       document.addEventListener(
@@ -216,7 +216,7 @@
             logDropdownSelect(combo);
           }
         },
-        true
+        true,
       );
 
       document.addEventListener(
@@ -226,7 +226,7 @@
           // selects, and (on blur) text fields.
           logEvent("change", e.target);
         },
-        true
+        true,
       );
 
       document.addEventListener(
@@ -236,7 +236,7 @@
           // `input` but `change` already covers them.
           if (isTextLike(e.target)) debounceInput(e.target);
         },
-        true
+        true,
       );
 
       // ---- FOCUS / VISIBILITY ----
