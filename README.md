@@ -13,9 +13,8 @@ This toolkit enables per-question response timing analysis for Qualtrics surveys
 
 ### 1. Add the timing logger to your survey
 
-Create an embedded data field named `__js_timing` in the survey flow **before** the
-first question block. Without this, Qualtrics silently writes to a field that does not export
-exist, so this step is not optional.
+Create an embedded data field named `__js_timing` in the survey flow **before**
+the first question block.
 
 Then go to **Look & Feel → Header**, click **edit**, switch to **Source**
 (`<>`) — Qualtrics mangles anything pasted outside source view — and paste:
@@ -39,11 +38,11 @@ Optional settings go on the script tag itself:
 ></script>
 ```
 
-| Attribute       | Default  | Meaning                                                                 |
-| --------------- | -------- | ----------------------------------------------------------------------- |
-| `data-field`    | `timing` | Embedded data field the event log is written to                         |
-| `data-debounce` | `500`    | Idle milliseconds before a typing burst is logged as one `input` event  |
-| `data-debug`    | `false`  | `true` mirrors every logged event to the browser console (testing only) |
+| Attribute       | Default  | Meaning                                                                                              |
+| --------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `data-field`    | `timing` | Embedded data field the event log is written to; Qualtrics prefixes it, so it lands in `__js_timing` |
+| `data-debounce` | `500`    | Idle milliseconds before a typing burst is logged as one `input` event                               |
+| `data-debug`    | `false`  | `true` mirrors every logged event to the browser console (testing only)                              |
 
 To check the logger while previewing a survey, open the browser console and
 run `SurveyTiming.state()` for the log written so far, or `SurveyTiming.page()`
