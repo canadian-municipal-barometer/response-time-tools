@@ -13,8 +13,8 @@ This toolkit enables per-question response timing analysis for Qualtrics surveys
 
 ### 1. Add the timing logger to your survey
 
-Create an embedded data field named `timing` in the survey flow **before** the
-first question block. Qualtrics silently drops writes to a field that does not
+Create an embedded data field named `__js_timing` in the survey flow **before** the
+first question block. Without this, Qualtrics silently writes to a field that does not export
 exist, so this step is not optional.
 
 Then go to **Look & Feel → Header**, click **edit**, switch to **Source**
@@ -39,11 +39,11 @@ Optional settings go on the script tag itself:
 ></script>
 ```
 
-| Attribute       | Default    | Meaning                                                                 |
-| --------------- | ---------- | ----------------------------------------------------------------------- |
-| `data-field`    | `timing`   | Embedded data field the event log is written to                          |
-| `data-debounce` | `500`      | Idle milliseconds before a typing burst is logged as one `input` event   |
-| `data-debug`    | `false`    | `true` mirrors every logged event to the browser console (testing only)  |
+| Attribute       | Default  | Meaning                                                                 |
+| --------------- | -------- | ----------------------------------------------------------------------- |
+| `data-field`    | `timing` | Embedded data field the event log is written to                         |
+| `data-debounce` | `500`    | Idle milliseconds before a typing burst is logged as one `input` event  |
+| `data-debug`    | `false`  | `true` mirrors every logged event to the browser console (testing only) |
 
 To check the logger while previewing a survey, open the browser console and
 run `SurveyTiming.state()` for the log written so far, or `SurveyTiming.page()`
@@ -70,6 +70,34 @@ qtimes  <- question_timings(events)           # one row per question answered
 
 `tests/helpers/fetch.R` pulls a fresh export straight from the Qualtrics API
 if you would rather not download a CSV by hand.
+
+### 3. Explore the timings interactively
+
+`timing_app()` opens a Shiny app on the output of `question_timings()`
+(requires `shiny`, `bslib`, and `plotly`):
+
+```r
+timing_app(qtimes, events = events)
+```
+
+- **Timeline** — a wide, horizontally scrollable bar chart of response time in
+  survey order, with a toggle between per-question and per-page bars. The
+  sidebar filters the scope from a single respondent up to the whole dataset
+  (respondents, pages, questions, time range); across multiple respondents the
+  bars show the median or mean with an IQR or SD interval and, optionally, the
+  individual responses overlaid. Clicking a bar opens that question in the
+  distribution view.
+- **Distribution** — a histogram and box plot for one question, plus central
+  tendency and variance statistics (mean, median, SD, variance, IQR, MAD,
+  coefficient of variation, skewness, and quantiles).
+
+Pass `events` to let the per-page view measure page duration from page load to
+page submit instead of summing its question times, and `labels` (a data frame
+with `qid` and `label` columns, e.g. from `qualtRics::extract_colmap()`) to
+show readable question names.
+
+`inst/shiny/timing-explorer/app.R` runs the same app standalone; set the
+`TIMING_CSV` environment variable to point it at an export.
 
 ## Publishing changes to the logger
 

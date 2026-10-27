@@ -3,5 +3,6 @@
 export(parse_timing)
 export(question_timings)
 export(read_qualtrics)
+export(timing_app)
 importFrom(rlang,"%||%")
 importFrom(rlang,.data)

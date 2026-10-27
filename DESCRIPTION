@@ -16,4 +16,9 @@ Imports:
     purrr,
     readr,
     rlang,
+    stats,
     tidyr
+Suggests: 
+    bslib,
+    plotly,
+    shiny
