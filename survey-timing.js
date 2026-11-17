@@ -11,13 +11,16 @@
  *
  *   <script src="https://canadian-municipal-barometer.github.io/response-time-tools/survey-timing.js"></script>
  *
- * The embedded data field must exist in the survey flow before it can be
- * written to. It defaults to `timing`; override it (and the text-input
- * debounce) with attributes on the script tag:
+ * Qualtrics rejects a page submit outright when any one embedded data value is
+ * over 20,000 bytes, so the log is spread across numbered fields: `timing`,
+ * then `timing_2`, `timing_3`, ... up to `data-max-fields`. Every one of them
+ * must exist in the survey flow (as __js_timing, __js_timing_2, ...) before it
+ * can be written to. Override the defaults with attributes on the script tag:
  *
  *   <script
  *     src="https://canadian-municipal-barometer.github.io/response-time-tools/survey-timing.js"
  *     data-field="timing"
+ *     data-max-fields="3"
  *     data-debounce="500"
  *     data-debug="false"
  *   ></script>
@@ -25,12 +28,24 @@
 (function (global) {
   "use strict";
 
-  var VERSION = "1.0.0";
+  var VERSION = "2.0.0";
+
+  // Qualtrics' per-value ceiling, in UTF-8 bytes. A submit carrying one byte
+  // more is refused with "body.ed.<field> exceeds maximum byte size of 20000",
+  // and the respondent cannot leave the page.
+  var QUALTRICS_MAX_BYTES = 20000;
 
   // ---- CONFIG ----
   var config = {
-    // Embedded data field the event log is written to.
+    // Embedded data field the event log is written to. Overflow goes to
+    // `<field>_2`, `<field>_3`, ...
     field: "timing",
+    // How many fields the log may spread across. Once all are full, further
+    // pages are stored with their events trimmed rather than not at all.
+    maxFields: 3,
+    // Bytes a field may hold before the log moves on to the next one. Kept
+    // under QUALTRICS_MAX_BYTES so a miscount can never block a submit.
+    maxBytes: 19500,
     // How long a text input must be idle before the typing burst is logged
     // as a single "input" event. 300-800ms is typical.
     inputDebounceMs: 500,
@@ -55,20 +70,31 @@
         config.inputDebounceMs = Number(preset.inputDebounceMs);
       }
       if (preset.debug != null) config.debug = Boolean(preset.debug);
+      if (preset.maxFields != null) config.maxFields = Number(preset.maxFields);
+      if (preset.maxBytes != null) config.maxBytes = Number(preset.maxBytes);
     }
 
     // document.currentScript is the tag being executed; it is null when the
     // file is inlined or eval'd, in which case the defaults stand.
     var tag = document.currentScript;
-    if (!tag || !tag.getAttribute) return;
+    if (tag && tag.getAttribute) {
+      var field = tag.getAttribute("data-field");
+      if (field) config.field = field;
 
-    var field = tag.getAttribute("data-field");
-    if (field) config.field = field;
+      var debounce = parseInt(tag.getAttribute("data-debounce"), 10);
+      if (!isNaN(debounce)) config.inputDebounceMs = debounce;
 
-    var debounce = parseInt(tag.getAttribute("data-debounce"), 10);
-    if (!isNaN(debounce)) config.inputDebounceMs = debounce;
+      var maxFields = parseInt(tag.getAttribute("data-max-fields"), 10);
+      if (!isNaN(maxFields)) config.maxFields = maxFields;
 
-    if (tag.getAttribute("data-debug") === "true") config.debug = true;
+      if (tag.getAttribute("data-debug") === "true") config.debug = true;
+    }
+
+    // Whatever was asked for, never let a value reach Qualtrics' ceiling.
+    if (!(config.maxFields >= 1)) config.maxFields = 1;
+    if (!(config.maxBytes > 0) || config.maxBytes > QUALTRICS_MAX_BYTES) {
+      config.maxBytes = QUALTRICS_MAX_BYTES;
+    }
   }
 
   function log() {
@@ -78,33 +104,141 @@
 
   // ---- STATE ----
   // `currentPage` is the page whose events are being collected right now. It
-  // is swapped in by startPage() on every Qualtrics "ready" and cleared on
-  // submit, so the document listeners below (installed once) always write to
-  // the page actually on screen.
+  // is swapped in by startPage() on every Qualtrics "ready", so the document
+  // listeners below (installed once) always write to the page actually on
+  // screen.
+  //
+  // Storage format (v2), one JSON document per field:
+  //
+  //   {"v":2,"p":[{"i":0,"t":1761590000000,"s":15234,"e":[[812,"c","QID5","radio"]]}]}
+  //
+  //   i  page index, counted across all fields
+  //   t  page load time, epoch milliseconds
+  //   s  submit time, milliseconds after load
+  //   e  events: [ms after load, type code, question id, input type], with
+  //      trailing empty entries dropped
+  //   d  events trimmed off the end of this page to make it fit (rare)
+  //
+  // v1 stored ISO timestamps and long keys on every event, about three times
+  // the size, which pushed a long survey past the 20,000-byte ceiling.
   var currentPage = null;
 
-  function getState() {
-    var raw = Qualtrics.SurveyEngine.getJSEmbeddedData(config.field);
+  var EVENT_CODES = {
+    change: "c",
+    click: "k",
+    input: "i",
+    hidden: "h",
+    visible: "v",
+    window_blur: "b",
+    window_focus: "f",
+  };
 
-    if (!raw) return { pages: [] };
+  function fieldName(k) {
+    return k === 0 ? config.field : config.field + "_" + (k + 1);
+  }
+
+  function byteLength(s) {
+    if (typeof TextEncoder === "function") {
+      return new TextEncoder().encode(s).length;
+    }
+    return unescape(encodeURIComponent(s)).length;
+  }
+
+  function readField(k) {
+    var raw = Qualtrics.SurveyEngine.getJSEmbeddedData(fieldName(k));
+    if (!raw) return [];
 
     try {
-      return JSON.parse(raw);
+      var doc = JSON.parse(raw);
+      return doc && doc.v === 2 && doc.p ? doc.p : [];
     } catch (e) {
-      return { pages: [] };
+      return [];
     }
   }
 
-  function setState(state) {
-    Qualtrics.SurveyEngine.setJSEmbeddedData(config.field, JSON.stringify(state));
+  function serialize(pages) {
+    return JSON.stringify({ v: 2, p: pages });
   }
 
-  function now() {
-    return new Date().toISOString();
+  function readAll() {
+    var fields = [];
+    for (var k = 0; k < config.maxFields; k++) fields.push(readField(k));
+    return fields;
   }
 
-  function getPageIndex(state) {
-    return state.pages.length;
+  function countPages(fields) {
+    var n = 0;
+    for (var k = 0; k < fields.length; k++) n += fields[k].length;
+    return n;
+  }
+
+  // Trim events off the end of `page` until `pages` plus it fits in one
+  // field. Returns the trimmed copy, or null if not even the bare page fits.
+  function fitPage(pages, page) {
+    var copy = {};
+    for (var key in page) copy[key] = page[key];
+    copy.e = page.e.slice();
+
+    var size = byteLength(serialize(pages.concat([copy])));
+    while (size > config.maxBytes && copy.e.length) {
+      // Each event is roughly 30 bytes; drop in batches so a very long page
+      // does not cost one stringify per event.
+      var excess = Math.ceil((size - config.maxBytes) / 30);
+      copy.e.length = Math.max(0, copy.e.length - Math.max(1, excess));
+      copy.d = page.e.length - copy.e.length;
+      size = byteLength(serialize(pages.concat([copy])));
+    }
+    return size <= config.maxBytes ? copy : null;
+  }
+
+  // Store `page`, replacing any earlier copy of it. A page whose submit is
+  // refused (a validation error, say) is submitted again from the same
+  // `currentPage`, and that second save must not leave two copies behind.
+  function savePage(page) {
+    var fields = readAll();
+    var k;
+    var dirty = {};
+
+    for (k = 0; k < fields.length; k++) {
+      for (var j = fields[k].length - 1; j >= 0; j--) {
+        if (fields[k][j].i === page.i) {
+          fields[k].splice(j, 1);
+          dirty[k] = true;
+        }
+      }
+    }
+
+    // Append to the newest non-empty field while the page fits whole.
+    // Otherwise move on to the next field -- only one, so a single huge page
+    // (trimmed there if it must be) cannot use up every remaining field. The
+    // final field takes whatever fits.
+    var last = 0;
+    for (k = 0; k < fields.length; k++) if (fields[k].length) last = k;
+
+    var placed = fitPage(fields[last], page);
+    k = last;
+    if ((!placed || placed.d) && last + 1 < fields.length) {
+      k = last + 1;
+      placed = fitPage(fields[k], page);
+    }
+    if (placed) {
+      fields[k].push(placed);
+      dirty[k] = true;
+    }
+
+    for (k in dirty) {
+      Qualtrics.SurveyEngine.setJSEmbeddedData(
+        fieldName(Number(k)),
+        serialize(fields[k]),
+      );
+    }
+
+    if (!placed) {
+      log("page", page.i, "not stored: all", config.maxFields, "fields are full");
+    } else if (placed.d) {
+      log("page", page.i, "stored with", placed.d, "events trimmed");
+    }
+    return placed;
   }
 
   // Resolve the Qualtrics question id (e.g. "QID69", or a matrix statement
@@ -137,33 +271,30 @@
   }
 
   // ---- EVENT LOGGER ----
-  function pushEvent(event) {
-    // Events can fire between a submit and the next page's "ready" (a stray
-    // blur, say). The page they belong to has already been serialized, so
-    // there is nowhere to put them.
+  // Events can also fire between a successful submit and the next page's
+  // "ready" (a stray blur, say). They land on a page that has already been
+  // saved and are lost unless that page is submitted again, which is fine.
+  function pushEvent(type, name, inputType) {
     if (!currentPage) return;
-    currentPage.events.push(event);
-    log(event);
+
+    var event = [Date.now() - currentPage.t, EVENT_CODES[type] || type];
+    if (name || inputType) event.push(name || null);
+    if (inputType) event.push(inputType);
+
+    currentPage.e.push(event);
+    log({ type: type, ms: event[0], name: name, input_type: inputType });
   }
 
   function logEvent(type, el) {
-    var event = {
-      type: type,
-      time: now(),
-    };
+    var name = null;
+    var inputType = null;
 
     if (el) {
-      if (el.type) {
-        event.input_type = el.type;
-      }
-
-      var name = resolveName(el);
-      if (name) {
-        event.name = name;
-      }
+      if (el.type) inputType = el.type;
+      name = resolveName(el);
     }
 
-    pushEvent(event);
+    pushEvent(type, name, inputType);
   }
 
   // ---- DEBOUNCE STATE (per element) ----
@@ -239,12 +370,7 @@
     if (match[0] === lastDropdown.name && t - lastDropdown.t < 500) return;
     lastDropdown = { name: match[0], t: t };
 
-    pushEvent({
-      type: "change",
-      time: now(),
-      input_type: "select",
-      name: match[0],
-    });
+    pushEvent("change", match[0], "select");
   }
 
   function optionFromEvent(e) {
@@ -331,29 +457,28 @@
 
   // ---- PAGE LIFECYCLE ----
   function startPage() {
-    var state = getState();
-
-    currentPage = {
-      page_index: getPageIndex(state),
-      load_time: now(),
-      events: [],
+    var page = {
+      i: countPages(readAll()),
+      t: Date.now(),
+      e: [],
     };
+    currentPage = page;
 
-    log("page", currentPage.page_index, "loaded");
+    log("page", page.i, "loaded");
 
+    // Bound to this page rather than to `currentPage`, so a late submit hook
+    // can never save the next page's events under this page's index. The
+    // page stays current after saving: if Qualtrics refuses the submit, the
+    // respondent is still on it, and the next attempt saves it again.
     Qualtrics.SurveyEngine.addOnPageSubmit(function () {
-      if (!currentPage) return;
-
-      currentPage.submit_time = now();
-
-      // Re-read rather than reusing the state captured at load: anything else
-      // on the page may have written embedded data in the meantime.
-      var latest = getState();
-      latest.pages.push(currentPage);
-      setState(latest);
-
-      log("page", currentPage.page_index, "submitted", currentPage.events.length, "events");
-      currentPage = null;
+      try {
+        page.s = Date.now() - page.t;
+        savePage(page);
+        log("page", page.i, "submitted", page.e.length, "events");
+      } catch (e) {
+        // Never let a logging failure stop the respondent moving on.
+        if (global.console) console.error("[survey-timing] save failed:", e);
+      }
     });
   }
 
@@ -426,9 +551,19 @@
       config: config,
       rearm: rearm,
       // Console helpers for testing a survey: SurveyTiming.state() shows the
-      // log written so far, SurveyTiming.page() the page in progress.
+      // log written so far, SurveyTiming.page() the page in progress, and
+      // SurveyTiming.bytes() how full each field is.
       state: function () {
-        return engineReady() ? getState() : null;
+        if (!engineReady()) return null;
+        return readAll().reduce(function (all, pages) {
+          return all.concat(pages);
+        }, []);
+      },
+      bytes: function () {
+        if (!engineReady()) return null;
+        return readAll().map(function (pages, k) {
+          return fieldName(k) + ": " + byteLength(serialize(pages));
+        });
       },
       page: function () {
         return currentPage;
