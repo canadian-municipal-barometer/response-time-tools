@@ -10,13 +10,15 @@ read_qualtrics(path)
 \item{path}{Path to a Qualtrics CSV file.}
 }
 \value{
-A \link[tibble:tibble-package]{tibble} with one row per response and an
-additional \code{"timing"} column containing the raw JS timing JSON strings.
+A \link[tibble:tibble-package]{tibble} with one row per response, whose
+\code{"timing"} column (and any \code{"timing_2"}, \code{"timing_3"}, ... overflow
+columns) contains the raw JS timing JSON strings.
 }
 \description{
 Qualtrics exports have a header row plus 2 metadata rows (display order
 and survey metadata).  This function keeps the header, skips the metadata,
-and renames the JavaScript timing column to \code{"timing"} for easier reference.
+and renames the JavaScript timing columns (\verb{__js_timing}, \verb{__js_timing_2},
+...) to \code{"timing"}, \code{"timing_2"}, ... for easier reference.
 }
 \examples{
 \dontrun{

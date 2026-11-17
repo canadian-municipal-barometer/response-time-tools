@@ -12,8 +12,9 @@ parse_timing(df, id_col = "ResponseId", timing_col = "timing")
 \item{id_col}{Name of the column that uniquely identifies respondents.
 Default \code{"ResponseId"}.}
 
-\item{timing_col}{Name of the column containing the raw timing JSON strings.
-Default \code{"timing"}.}
+\item{timing_col}{Name of the first column containing the raw timing JSON
+strings.  Overflow columns named \verb{<timing_col>_2}, \verb{<timing_col>_3}, ...
+are picked up automatically.  Default \code{"timing"}.}
 }
 \value{
 A \link[tibble:tibble-package]{tibble} with columns:
@@ -31,10 +32,17 @@ A \link[tibble:tibble-package]{tibble} with columns:
 }
 }
 \description{
-Parses the JSON timing data stored in a column of a Qualtrics export and
-returns a tidy, row-per-event data frame.  Each event records a page index,
-load/submit timestamps, event type, timestamp, input element metadata, and
-seconds elapsed since page load.
+Parses the JSON timing data stored in a Qualtrics export and returns a tidy,
+row-per-event data frame.  Each event records a page index, load/submit
+timestamps, event type, timestamp, input element metadata, and seconds
+elapsed since page load.
+}
+\details{
+The logger spreads long logs across numbered fields (\code{timing}, \code{timing_2},
+\code{timing_3}, ...) to stay under Qualtrics' 20,000-byte limit per embedded
+data value.  Every such column present in \code{df} is read and the pages are
+combined.  Both the current compact log format (v2) and the original one
+(v1) are understood.
 }
 \examples{
 \dontrun{
